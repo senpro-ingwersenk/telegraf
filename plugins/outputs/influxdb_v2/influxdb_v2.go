@@ -37,6 +37,7 @@ type InfluxDB struct {
 	Timeout          config.Duration           `toml:"timeout"`
 	HTTPHeaders      map[string]*config.Secret `toml:"http_headers"`
 	HTTPProxy        string                    `toml:"http_proxy"`
+	HttpLegacyWriter bool                      `toml:"http_legacy_writer"`
 	UserAgent        string                    `toml:"user_agent"`
 	ContentEncoding  string                    `toml:"content_encoding"`
 	UintSupport      bool                      `toml:"influx_uint_support"`
@@ -48,7 +49,7 @@ type InfluxDB struct {
 	commontls.ClientConfig
 	ratelimiter.RateLimitConfig
 
-	clients    []*httpClient
+	clients    []httpExecutor
 	encoder    internal.ContentEncoder
 	serializer ratelimiter.Serializer
 	tlsCfg     *tls.Config
@@ -150,27 +151,63 @@ func (i *InfluxDB) Connect() error {
 			if err != nil {
 				return err
 			}
-			c := &httpClient{
-				url:              parts,
-				localAddr:        localAddr,
-				token:            i.Token,
-				organization:     i.Organization,
-				bucket:           i.Bucket,
-				bucketTag:        i.BucketTag,
-				excludeBucketTag: i.ExcludeBucketTag,
-				timeout:          time.Duration(i.Timeout),
-				headers:          i.HTTPHeaders,
-				proxy:            proxy,
-				userAgent:        i.UserAgent,
-				contentEncoding:  i.ContentEncoding,
-				tlsConfig:        i.tlsCfg,
-				pingTimeout:      i.PingTimeout,
-				readIdleTimeout:  i.ReadIdleTimeout,
-				encoder:          i.encoder,
-				rateLimiter:      limiter,
-				serializer:       i.serializer,
-				concurrent:       i.ConcurrentWrites,
-				log:              i.Log,
+			var c httpExecutor
+			if i.HttpLegacyWriter {
+				unwrappedHeaders := map[string]string{}
+				for header, value := range i.HTTPHeaders {
+					secret, err := value.Get()
+					if err != nil {
+						return err
+					}
+
+					headerVal := secret.String()
+					secret.Destroy()
+					unwrappedHeaders[header] = headerVal
+				}
+				c = &legacyHttpClient{
+					url:              parts,
+					localAddr:        localAddr,
+					token:            i.Token,
+					organization:     i.Organization,
+					bucket:           i.Bucket,
+					bucketTag:        i.BucketTag,
+					excludeBucketTag: i.ExcludeBucketTag,
+					timeout:          time.Duration(i.Timeout),
+					headers:          unwrappedHeaders,
+					proxy:            proxy,
+					userAgent:        i.UserAgent,
+					contentEncoding:  i.ContentEncoding,
+					tlsConfig:        i.tlsCfg,
+					pingTimeout:      i.PingTimeout,
+					readIdleTimeout:  i.ReadIdleTimeout,
+					encoder:          i.encoder,
+					rateLimiter:      limiter,
+					serializer:       i.serializer,
+					log:              i.Log,
+				}
+			} else {
+				c = &httpClient{
+					url:              parts,
+					localAddr:        localAddr,
+					token:            i.Token,
+					organization:     i.Organization,
+					bucket:           i.Bucket,
+					bucketTag:        i.BucketTag,
+					excludeBucketTag: i.ExcludeBucketTag,
+					timeout:          time.Duration(i.Timeout),
+					headers:          i.HTTPHeaders,
+					proxy:            proxy,
+					userAgent:        i.UserAgent,
+					contentEncoding:  i.ContentEncoding,
+					tlsConfig:        i.tlsCfg,
+					pingTimeout:      i.PingTimeout,
+					readIdleTimeout:  i.ReadIdleTimeout,
+					encoder:          i.encoder,
+					rateLimiter:      limiter,
+					serializer:       i.serializer,
+					concurrent:       i.ConcurrentWrites,
+					log:              i.Log,
+				}
 			}
 
 			if err := c.Init(); err != nil {
@@ -201,7 +238,7 @@ func (i *InfluxDB) Write(metrics []telegraf.Metric) error {
 	for _, n := range rand.Perm(len(i.clients)) {
 		client := i.clients[n]
 		if err := client.Write(ctx, metrics); err != nil {
-			i.Log.Errorf("When writing to [%s]: %v", client.url, err)
+			i.Log.Errorf("When writing to [%s]: %v", client.GetUrl(), err)
 			var werr *internal.PartialWriteError
 			if errors.As(err, &werr) || errors.Is(err, internal.ErrSizeLimitReached) {
 				return err

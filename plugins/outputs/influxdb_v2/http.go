@@ -138,6 +138,10 @@ func (c *httpClient) Init() error {
 	return nil
 }
 
+func (c *httpClient) GetUrl() *url.URL {
+	return c.url
+}
+
 func (c *httpClient) Write(ctx context.Context, metrics []telegraf.Metric) error {
 	if c.retryTime.After(time.Now()) {
 		return errors.New("retry time has not elapsed")
