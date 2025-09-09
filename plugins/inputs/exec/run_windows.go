@@ -22,6 +22,7 @@ func (c *commandRunner) run(command string) (out, errout []byte, err error) {
 		return nil, nil, fmt.Errorf("exec: unable to parse command: %w", err)
 	}
 
+	c.log.Debugf("Preparing command: %s", splitCmd)
 	cmd := exec.Command(splitCmd[0], splitCmd[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
@@ -41,6 +42,17 @@ func (c *commandRunner) run(command string) (out, errout []byte, err error) {
 	stderr = removeWindowsCarriageReturns(stderr)
 	if stderr.Len() > 0 && !c.debug {
 		truncate(&stderr)
+	}
+
+	c.log.Debugf("Command stdout:\n%s", outbuf.String())
+	c.log.Debugf("Command stderr:\n%s", stderr.String())
+
+	if cmd.ProcessState != nil {
+		if cmd.ProcessState.Exited() {
+			c.log.Debugf("Command exit code: %d", cmd.ProcessState.ExitCode())
+		} else {
+			c.log.Debugf("Command never ran (there is no exit code)")
+		}
 	}
 
 	return outbuf.Bytes(), stderr.Bytes(), runErr

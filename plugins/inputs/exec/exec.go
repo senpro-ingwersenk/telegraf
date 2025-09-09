@@ -52,6 +52,7 @@ type commandRunner struct {
 	environment []string
 	timeout     time.Duration
 	debug       bool
+	log         telegraf.Logger
 }
 
 func (*Exec) SampleConfig() string {
@@ -68,6 +69,7 @@ func (e *Exec) Init() error {
 		environment: e.Environment,
 		timeout:     time.Duration(e.Timeout),
 		debug:       e.Log.Level().Includes(telegraf.Debug),
+		log:         e.Log,
 	}
 
 	return nil
